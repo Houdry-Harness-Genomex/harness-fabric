@@ -1,0 +1,20 @@
+/bin/
+/dist/
+/data/
+/houdry-data/
+/.gocache/
+/.gomod/
+*.exe
+*.test
+*.out
+.DS_Store
+
+# routed-chat artifacts and local CAD debug logs
+/generated/
+/cad_*.txt
+/.venv/
+*.exe~
+
+# Python bytecode from the CAD pipeline.
+__pycache__/
+*.pyc
