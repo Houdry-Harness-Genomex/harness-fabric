@@ -29,46 +29,82 @@ DeepSeek Harness acts as the agent UI and execution environment. Houdry provides
 
 ## Quick Start
 
-### 1. Start Houdry fabric
+Two integration methods are available:
 
-On your control plane machine:
+### Method A: Native Plugin with WiFi Discovery (Recommended)
+
+Uses the same automatic WiFi discovery protocol as Houdry Agent and GPU workers. Zero manual configuration when on the same network.
+
+**1. Start Houdry fabric**
 
 ```bash
 houdry serve --listen 0.0.0.0:8080
 ```
 
-If you have a GPU worker, register it in another terminal:
+Register GPU workers:
 
 ```bash
 houdry gpu detect
 houdry gpu register
 ```
 
-Verify models are available:
+**2. Install Houdry plugin**
+
+From the Houdry-harness repository:
 
 ```bash
-houdry model list --server https://127.0.0.1:8080
+cd Houdry-harness
+pnpm install
+pnpm run build
 ```
 
-### 2. Run DeepSeek Harness
+The `llm-houdry` plugin is included in the repository at `packages/llm/llm-houdry/`.
+
+**3. Configure plugin**
+
+Edit your DeepSeek Harness profile configuration (or add via Web UI):
+
+```yaml
+plugins:
+  llm-houdry:
+    enableDiscovery: true  # Automatic WiFi discovery
+    discoveryTimeout: 3000
+```
+
+Leave `baseURL` empty. The plugin finds the control plane automatically using mDNS and UDP broadcast (same protocol as Houdry Agent).
+
+**4. Run DeepSeek Harness**
+
+```bash
+export NODE_EXTRA_CA_CERTS="$HOME/.houdry/server/pki/root_ca.crt"
+pnpm dsh web
+```
+
+The plugin will discover the fabric on WiFi and connect automatically.
+
+**5. Start a chat**
+
+Select `model=auto` (recommended) or a specific model. The fabric routes intelligently to available GPU workers.
+
+---
+
+### Method B: Manual Configuration via Custom Provider
+
+If WiFi discovery is not available (different networks, firewall restrictions, etc.), use the manual OpenAI-compatible provider setup.
+
+**1. Start Houdry fabric**
+
+Same as Method A.
+
+**2. Run DeepSeek Harness**
 
 ```bash
 npx @deepseek-ai/dsh web
 ```
 
-Or from source:
-
-```bash
-git clone https://github.com/Houdry-Harness-Genomex/Houdry-harness.git
-cd Houdry-harness
-pnpm install
-pnpm run build
-pnpm dsh web
-```
-
 The Web UI opens at `http://127.0.0.1:3080` by default.
 
-### 3. Configure Houdry as Model Provider
+**3. Configure Houdry as Model Provider**
 
 In the DeepSeek Harness Web UI:
 
@@ -95,7 +131,7 @@ In the DeepSeek Harness Web UI:
 
 The configuration is stored in `$DSH_HOME/profiles/web/cordis.patch.yml` (default: `~/.dsh/profiles/web/cordis.patch.yml`) and hot-reloads automatically.
 
-### 4. Trust Houdry's TLS Certificate
+**4. Trust Houdry's TLS Certificate**
 
 DeepSeek Harness makes HTTPS requests to the fabric. Since Houdry uses a self-signed CA, you need to trust it.
 
@@ -125,7 +161,7 @@ On Windows (PowerShell as Administrator):
 Import-Certificate -FilePath "$HOME\.houdry\server\pki\root_ca.crt" -CertStoreLocation Cert:\LocalMachine\Root
 ```
 
-### 5. Start a Chat
+**5. Start a Chat
 
 1. Create a new chat session
 2. Select model `auto` (recommended) or a specific model from your fabric
@@ -273,18 +309,21 @@ Requests flow:
 
 ### Differences from Houdry Agent
 
-| Feature | Houdry Agent | DeepSeek Harness |
-|---------|--------------|------------------|
-| Language | Electron (JavaScript) | Node.js + Cordis |
-| UI | Desktop app (fork of Hermes) | Web UI (browser) |
-| Architecture | Monolithic agent | Plugin-based harness |
-| Discovery | WiFi mDNS discovery | Manual URL configuration |
-| Platform | Windows, macOS, Linux | Cross-platform (runs anywhere Node.js runs) |
-| Agent framework | Built-in | Extensible via plugins |
+| Feature | Houdry Agent | DeepSeek Harness (Native Plugin) | DeepSeek Harness (Manual Provider) |
+|---------|--------------|----------------------------------|-------------------------------------|
+| Language | Electron (JavaScript) | Node.js + Cordis | Node.js + Cordis |
+| UI | Desktop app (fork of Hermes) | Web UI (browser) | Web UI (browser) |
+| Architecture | Monolithic agent | Plugin-based harness | Plugin-based harness |
+| Discovery | WiFi mDNS + UDP (automatic) | WiFi mDNS + UDP (automatic) | Manual URL configuration |
+| CA Trust | Auto-loaded | Auto-loaded from ~/.houdry | Manual paste into UI |
+| Setup | Zero-config (same WiFi) | Zero-config (same WiFi) | Multi-step manual |
+| Platform | Windows, macOS, Linux | Cross-platform | Cross-platform |
+| Agent framework | Built-in | Extensible via plugins | Extensible via plugins |
 
-Both use the same Houdry fabric `/v1` API. Choose based on your workflow:
-- **Houdry Agent**: Recommended for desktop users who want WiFi auto-discovery and a native app experience
-- **DeepSeek Harness**: For developers who want a plugin-based agent harness with extensibility
+All three use the same Houdry fabric `/v1` API. Choose based on your workflow:
+- **Houdry Agent**: Recommended for desktop users who want a native app experience
+- **DeepSeek Harness (Native Plugin)**: For developers on the same WiFi who want automatic discovery like Houdry Agent
+- **DeepSeek Harness (Manual Provider)**: When WiFi discovery is not available (firewall, different networks, etc.)
 
 ## Advanced Configuration
 
