@@ -1,29 +1,64 @@
-# Houdry
+# Harness Fabric
 
-Houdry is a private GPU fabric. It finds GPUs on machines you already own, joins those machines into a cluster, picks a local model for each request, and runs inference on the chosen node. Work stays on your network. There is no cloud LLM API in the path.
+**Private GPU fabric for DeepSeek Harness.**
 
-This repository is the fabric: a single Go CLI that is the control plane and the worker agent. End-user chat lives in a separate product, [Houdry Agent](https://github.com/houdry-genomex/houdry-agent), which talks to this fabric over the OpenAI-shaped `/v1` API.
+Harness Fabric is a private GPU fabric. It finds GPUs on machines you already own, joins those machines into a cluster, picks a local model for each request, and runs inference on the chosen node. Work stays on your network. There is no cloud LLM API in the path.
+
+This repository is the fabric: a single Go CLI that is the control plane and the worker agent. Agent orchestration lives in **[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)** (or **[Houdry Harness](https://github.com/Houdry-Harness-Genomex/Houdry-harness)** for the Houdry fork), which talks to this fabric over the OpenAI-shaped `/v1` API.
+
+## Architecture: Harness + Fabric
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              DeepSeek Harness / Houdry Harness          │
+│              (Agent Orchestration Layer)                │
+│   • Task Planning  • Tool Orchestration  • Workflows   │
+└────────────────────┬────────────────────────────────────┘
+                     │ OpenAI-compatible API
+                     │ POST /v1/chat/completions
+                     ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Harness Fabric                       │
+│              (Private Inference Backend)                │
+│   • Model Routing  • Job Scheduling  • Load Balancing  │
+└────────────────────┬────────────────────────────────────┘
+                     │
+        ┌────────────┴────────────┐
+        ▼                         ▼
+┌──────────────┐          ┌──────────────┐
+│ GPU Worker 1 │          │ GPU Worker N │
+│ • Ollama     │   ...    │ • Ollama     │
+│ • Inference  │          │ • Inference  │
+└──────────────┘          └──────────────┘
+```
+
+## Who installs what
+
+| Role | Install |
+|------|---------|
+| GPU / ops | **Harness Fabric** (this repo) — `serve`, `node join`, models |
+| Normal user | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) or [Houdry Harness](https://github.com/Houdry-Harness-Genomex/Houdry-harness) — Orchestration → fabric URL |
 
 ## What it does
 
 - Discovers GPUs (NVIDIA, AMD, and platform inventory on Linux, Windows, and macOS) and reports a normalized inventory.
-- Announces the control plane on the local WiFi so GPU nodes and Houdry Agent can find it without typing an IP.
+- Announces the control plane on the local WiFi so GPU nodes and Harness clients can find it without typing an IP.
 - Runs a control plane (`houdry serve`) that registers nodes, stores jobs on disk, and serves a cluster dashboard.
 - Runs a node agent (`houdry gpu register`) that heartbeats, claims jobs, and executes them. Local and remote workers use the same HTTP APIs.
 - Schedules two job types: `gpu.smoke` (runtime liveness probe) and `inference` (generate text through a model runtime).
 - Routes a prompt by analyzing it (modality, complexity, capabilities), matching it against a model catalog, and scoring `(model, node)` pairs. Prefer a loaded, right-sized model on a READY node.
-- Exposes `POST /v1/chat/completions` so OpenAI SDKs and Houdry Agent can use the fabric. `model=auto` runs the router; a named model pins that model. With no READY GPU node, the same endpoint talks to Ollama on this machine (live token streaming, vision, CAD) instead of queuing a cluster job.
+- Exposes `POST /v1/chat/completions` so OpenAI SDKs and DeepSeek/Houdry Harness can use the fabric. `model=auto` runs the router; a named model pins that model. With no READY GPU node, the same endpoint talks to Ollama on this machine (live token streaming, vision, CAD) instead of queuing a cluster job.
 - `houdry route --local` is a terminal bench against this machine's Ollama. Chat, streaming, and CAD go through `houdry serve`.
 
 The working model runtime is Ollama. vLLM and llama.cpp adapters exist as stubs (`Available` is always false).
 
-## Architecture
+## Fabric Architecture
 
 ```mermaid
 flowchart TB
   subgraph clients [Clients]
     CLI["houdry CLI"]
-    Agent["Houdry Agent / OpenAI SDK"]
+    Harness["DeepSeek/Houdry Harness<br/>OpenAI SDK"]
     Browser["Browser chat"]
   end
 
@@ -52,8 +87,8 @@ flowchart TB
 
   CLI --> HTTP
   CLI --> LAN
-  Agent --> HTTP
-  Agent --> LAN
+  Harness --> HTTP
+  Harness --> LAN
   Browser --> HTTP
 
   HTTP --> Router
@@ -79,7 +114,7 @@ flowchart TB
 Two processes matter:
 
 1. **Control plane** (`houdry serve`). Holds the node list, the job queue, and the catalog. On `POST /v1/route` or `POST /v1/chat/completions` with a READY GPU node it decides a model and node, creates an `inference` job, and waits for a worker to finish it (streaming on that path buffers the full answer). With no READY GPU node it runs the same `/v1` against Ollama on this machine: live token streaming, vision, and the drawing→STEP CAD pipeline. Generated files are served at `/files/`.
-2. **Compute** (`houdry gpu register`). One process per GPU machine. Detect first (`houdry gpu detect`), then register. It finds the control plane on WiFi, stays running, and logs when work arrives from Houdry Agent. Ctrl+C drains, waits for the current job, then leaves. `--server` still works as an override. `houdry node join` is the same command.
+2. **Compute** (`houdry gpu register`). One process per GPU machine. Detect first (`houdry gpu detect`), then register. It finds the control plane on WiFi, stays running, and logs when work arrives from DeepSeek/Houdry Harness. Ctrl+C drains, waits for the current job, then leaves. `--server` still works as an override. `houdry node join` is the same command.
 
 `houdry route --local` / `--interactive` is a terminal bench against this machine's Ollama. It does not start a second HTTP server.
 
@@ -125,7 +160,7 @@ GitHub latest release into `~/.houdry/bin`:
 Linux / macOS:
 
 ```bash
-curl -fsSL https://github.com/houdry-genomex/houdry/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/Houdry-Harness-Genomex/harness-fabric/releases/latest/download/install.sh | sh
 export PATH="$HOME/.houdry/bin:$PATH"
 houdry version
 houdry gpu detect
@@ -134,7 +169,7 @@ houdry gpu detect
 Windows PowerShell:
 
 ```powershell
-irm https://github.com/houdry-genomex/houdry/releases/latest/download/install.ps1 | iex
+irm https://github.com/Houdry-Harness-Genomex/harness-fabric/releases/latest/download/install.ps1 | iex
 & "$HOME\.houdry\bin\houdry.exe" version
 & "$HOME\.houdry\bin\houdry.exe" gpu detect
 ```
@@ -150,11 +185,11 @@ houdry gpu detect
 houdry gpu register
 ```
 
-Leave `register` running. It finds the control plane on WiFi, stays READY, and prints a log line when Houdry Agent (through the control plane) sends work. End users never talk to this GPU. They talk to the control plane (`houdry serve`).
+Leave `register` running. It finds the control plane on WiFi, stays READY, and prints a log line when DeepSeek/Houdry Harness (through the control plane) sends work. End users never talk to this GPU. They talk to the control plane (`houdry serve`).
 
 ## Find on WiFi
 
-`houdry serve` announces itself on the LAN (mDNS `_houdry._tcp` and UDP port 41808). GPU nodes and Houdry Agent browse for that announce. You do not type an IP when there is exactly one control plane on the WiFi.
+`houdry serve` announces itself on the LAN (mDNS `_houdry._tcp` and UDP port 41808). GPU nodes and Harness clients browse for that announce. You do not type an IP when there is exactly one control plane on the WiFi.
 
 ```bash
 # Control plane (any machine on the WiFi; GPU not required)
@@ -168,11 +203,11 @@ houdry gpu register
 houdry discover
 ```
 
-Houdry Agent: join the same WiFi, pick the fabric URL in onboarding. If one control plane is visible, the URL fills in. Confirm with Connect.
+DeepSeek/Houdry Harness: join the same WiFi, configure the fabric URL. If one control plane is visible, the URL can be auto-discovered. Confirm with Connect.
 
-If several control planes answer, pass `--server https://HOST:8080` (nodes) or pick the URL in Agent. Guest WiFi that isolates clients blocks this; use a URL in that case. `houdry serve --no-lan-discover` turns announce off.
+If several control planes answer, pass `--server https://HOST:8080` (nodes) or specify the URL in Harness config. Guest WiFi that isolates clients blocks this; use a URL in that case. `houdry serve --no-lan-discover` turns announce off.
 
-Agent and other OpenAI clients use `https://<host>:8080/v1` and must trust the Houdry Root CA (`$HOUDRY_HOME/server/pki/root_ca.crt`). The machine also serves `GET /.well-known/houdry.json` so a discovered address can be confirmed. Node APIs require a client certificate issued during enrollment (`houdry node enroll create` on the plane, then `houdry gpu register` on the GPU host). See [docs/security](docs/security/PKI.md).
+Harness and other OpenAI clients use `https://<host>:8080/v1` and must trust the Harness Fabric Root CA (`$HOUDRY_HOME/server/pki/root_ca.crt`). The machine also serves `GET /.well-known/houdry.json` so a discovered address can be confirmed. Node APIs require a client certificate issued during enrollment (`houdry node enroll create` on the plane, then `houdry gpu register` on the GPU host). See [docs/security](docs/security/PKI.md).
 
 ## Run a cluster
 
@@ -204,7 +239,7 @@ curl --cacert "$HOME/.houdry/server/pki/root_ca.crt" \
   -d "{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}"
 ```
 
-Point Houdry Agent or any OpenAI SDK at `https://<host>:8080/v1`. Pass `--token` on `serve` to require `X-Houdry-Token` or `Authorization: Bearer`.
+Point DeepSeek/Houdry Harness or any OpenAI SDK at `https://<host>:8080/v1`. Pass `--token` on `serve` to require `X-Houdry-Token` or `Authorization: Bearer`.
 
 ## Same laptop, no GPU node yet
 
@@ -214,7 +249,7 @@ Start Ollama, pull at least one model, then start the control plane. Chat, strea
 houdry serve --listen 0.0.0.0:8080
 ```
 
-Point Agent or an SDK at `https://127.0.0.1:8080/v1`. When a GPU host later registers, the same URL starts dispatching cluster jobs.
+Point Harness or an SDK at `https://127.0.0.1:8080/v1`. When a GPU host later registers, the same URL starts dispatching cluster jobs.
 
 CAD is a tool, not a model pick. An attached drawing plus CAD wording (for example "STEP file", "3d model") runs `scripts/cad/houdry_pipeline.py`: a vision model reads the drawing, a code model writes CadQuery, OpenCascade exports STEP. Setup: `scripts/cad/setup.sh`. STEP files land under `--data` (default `~/.houdry/server/generated`) and are served at `/files/`.
 
@@ -224,6 +259,33 @@ Terminal bench (no HTTP):
 houdry route --local "Say hello"
 houdry route --local --run "Say hello"
 houdry route --interactive
+```
+
+## Harness configuration
+
+**DeepSeek Harness:**
+
+```yaml
+# DeepSeek Harness config
+model:
+  provider: custom
+  base_url: https://127.0.0.1:8080/v1
+  default: auto
+```
+
+**Houdry Harness:**
+
+```yaml
+# ~/.houdry-harness/config.yaml
+model:
+  provider: custom
+  base_url: https://127.0.0.1:8080/v1
+  default: auto
+```
+
+```bash
+# Optional API key
+OPENAI_API_KEY=houdry
 ```
 
 ## Commands
@@ -294,3 +356,13 @@ make dist
 ```
 
 Release line is **v0.6.1**. Tag and publish: [docs/Release.md](docs/Release.md).
+
+## Community and support
+
+- Submit feedback or bug reports through [GitHub Discussions](https://github.com/Houdry-Harness-Genomex/harness-fabric/discussions)
+- For DeepSeek Harness (orchestration): [DeepSeek Harness discussions](https://github.com/deepseek-ai/deepseek-harness/discussions)
+- For Houdry Harness (fork): [Houdry Harness discussions](https://github.com/Houdry-Harness-Genomex/Houdry-harness/discussions)
+
+## License
+
+[MIT](LICENSE)
